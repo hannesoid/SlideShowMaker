@@ -9,7 +9,7 @@
 import UIKit
 import AVFoundation
 
-public class VideoMaker: NSObject {
+public final class VideoMaker {
     
     public typealias CompletedCombineBlock = (_ success: Bool, _ videoURL: URL?) -> Void
     public typealias Progress = (_ progress: Float) -> Void
@@ -66,8 +66,7 @@ public class VideoMaker: NSObject {
         }
     }
     
-    public override init() {
-        super.init()
+    public init() {
     }
     
     public convenience init(images: [UIImage?], transition: ImageTransition) {
@@ -93,7 +92,7 @@ public class VideoMaker: NSObject {
             if success && url != nil {
                 let video = AVURLAsset(url: url!)
                 let item = VideoItem(video: video, audio: audio, audioTimeRange: audioTimeRange)
-                self.videoExporter = VideoExporter(withe: item)
+                self.videoExporter = VideoExporter(with: item)
                 self.videoExporter.export()
                 let timeRate = self.currentProgress
                 self.videoExporter.exportingBlock = { exportCompleted, progress, videoURL, error in
