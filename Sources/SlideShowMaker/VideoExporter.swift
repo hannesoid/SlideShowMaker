@@ -143,7 +143,7 @@ private extension VideoExporter {
     func merge(composition: AVMutableComposition, duration: CMTime) {
         
         let filename = "merge.mov"
-        let path = K.Path.MovURL.appendingPathComponent(filename)
+        let path = VideoMaker.Constants.Path.movURL.appendingPathComponent(filename)
         print(path)
         self.deletePreviousTmpVideo(url: path)
         

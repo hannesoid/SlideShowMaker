@@ -11,6 +11,7 @@ import UIKit
 extension UIImage{
     
     convenience init(view: UIView) {
+        // TODO: there may be better API for this: UIGraphicsImageRenderer or snapshotting
         UIGraphicsBeginImageContextWithOptions(view.bounds.size, view.isOpaque, 0)
         view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
         view.layer.render(in: UIGraphicsGetCurrentContext()!)

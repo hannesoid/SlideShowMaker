@@ -192,7 +192,7 @@ public final class VideoMaker {
         }
         
         // path
-        let path = K.Path.MovURL.appendingPathComponent("\(self.movement).mov")
+        let path = VideoMaker.Constants.Path.movURL.appendingPathComponent("\(self.movement).mov")
         print(path)
         self.deletePreviousTmpVideo(url: path)
         
@@ -251,7 +251,7 @@ public final class VideoMaker {
         self.changeNextIfNeeded()
         
         // video path
-        let path = K.Path.MovURL.appendingPathComponent("\(transition).mov")
+        let path = VideoMaker.Constants.Path.movURL.appendingPathComponent("\(transition).mov")
         print(path)
         self.deletePreviousTmpVideo(url: path)
         
@@ -997,6 +997,6 @@ public final class VideoMaker {
     }
     
     fileprivate  func createDirectory() {
-        try? FileManager.default.createDirectory(at: K.Path.MovURL, withIntermediateDirectories: true, attributes: nil)
+        try? FileManager.default.createDirectory(at: VideoMaker.Constants.Path.movURL, withIntermediateDirectories: true, attributes: nil)
     }
 }
