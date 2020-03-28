@@ -8,15 +8,20 @@
 
 import UIKit
 
-extension UIImage{
+extension UIImage {
     
     convenience init(view: UIView) {
-        // TODO: there may be better API for this: UIGraphicsImageRenderer or snapshotting
-        UIGraphicsBeginImageContextWithOptions(view.bounds.size, view.isOpaque, 0)
-        view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
-        view.layer.render(in: UIGraphicsGetCurrentContext()!)
-        let image = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        self.init(cgImage: image!.cgImage!)
+        if #available(iOS 10.0, *) {
+            let renderer = UIGraphicsImageRenderer(size: view.bounds.size)
+
+            let image = renderer.image { imageRendererContext in
+                view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+                view.layer.render(in: UIGraphicsGetCurrentContext()!)
+            }
+            self.init(cgImage: image.cgImage!)
+        } else {
+            fatalError()
+            // Fallback on earlier versions
+        }
     }
 }
