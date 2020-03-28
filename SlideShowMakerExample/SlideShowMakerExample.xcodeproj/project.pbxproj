@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 50;
+	objectVersion = 52;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -14,6 +14,7 @@
 		D1782606242FC49600C5D08A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D1782605242FC49600C5D08A /* Assets.xcassets */; };
 		D1782609242FC49600C5D08A /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = D1782607242FC49600C5D08A /* LaunchScreen.storyboard */; };
 		D1782613242FC53E00C5D08A /* Sound.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = D1782612242FC53D00C5D08A /* Sound.mp3 */; };
+		D1782616242FC61500C5D08A /* SlideShowMaker in Frameworks */ = {isa = PBXBuildFile; productRef = D1782615242FC61500C5D08A /* SlideShowMaker */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +34,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D1782616242FC61500C5D08A /* SlideShowMaker in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -86,6 +88,9 @@
 			dependencies = (
 			);
 			name = SlideShowMakerExample;
+			packageProductDependencies = (
+				D1782615242FC61500C5D08A /* SlideShowMaker */,
+			);
 			productName = SlideShowMakerExample;
 			productReference = D17825F9242FC49500C5D08A /* SlideShowMakerExample.app */;
 			productType = "com.apple.product-type.application";
@@ -114,6 +119,9 @@
 				Base,
 			);
 			mainGroup = D17825F0242FC49500C5D08A;
+			packageReferences = (
+				D1782614242FC61500C5D08A /* XCRemoteSwiftPackageReference "SlideShowMaker" */,
+			);
 			productRefGroup = D17825FA242FC49500C5D08A /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -342,6 +350,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D1782614242FC61500C5D08A /* XCRemoteSwiftPackageReference "SlideShowMaker" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "git@github.com:hannesoid/SlideShowMaker.git";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D1782615242FC61500C5D08A /* SlideShowMaker */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D1782614242FC61500C5D08A /* XCRemoteSwiftPackageReference "SlideShowMaker" */;
+			productName = SlideShowMaker;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D17825F1242FC49500C5D08A /* Project object */;
 }

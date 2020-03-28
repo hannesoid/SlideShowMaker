@@ -1,0 +1,16 @@
+{
+  "object": {
+    "pins": [
+      {
+        "package": "SlideShowMaker",
+        "repositoryURL": "git@github.com:hannesoid/SlideShowMaker.git",
+        "state": {
+          "branch": "master",
+          "revision": "7d83dab0b8f539e9bf8cf25449a2530d95cfaf4a",
+          "version": null
+        }
+      }
+    ]
+  },
+  "version": 1
+}
