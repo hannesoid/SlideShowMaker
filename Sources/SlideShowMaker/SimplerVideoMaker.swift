@@ -21,25 +21,22 @@ public final class SimplerVideoMaker {
     public var size = CGSize(width: 640, height: 640)
     
     public var definition: CGFloat = 1
-    
+
     /// Video duration
-    public var videoDuration: Int?
+    public var videoDuration: CMTime
     
-    /// Every image duration, defualt 2
-    public var frameDuration: Int = 2
-    
-    // Every image animation duration, default 1
-    public var transitionDuration: Int = 1
-    
+    /// Every image duration
+    private var frameDuration: CMTime = .init(value: 2, timescale: 1)
+
     fileprivate var videoWriter: AVAssetWriter?
     fileprivate var videoExporter: VideoExporter?
-    fileprivate var timescale = 10000000
     fileprivate let mediaInputQueue = DispatchQueue(label: "mediaInputQueue")
     fileprivate let flags = CVPixelBufferLockFlags(rawValue: 0)
 
 
-    public init(images: [UIImage]) {
+    public init(images: [UIImage], videoDuration: CMTime) {
         self.images = images
+        self.videoDuration = videoDuration
     }
 
     public func exportVideo(audio: AVURLAsset?, audioTimeRange: CMTimeRange?, updateHandler: @escaping ProgressHandler) -> SimplerVideoMaker {
@@ -80,20 +77,8 @@ public final class SimplerVideoMaker {
     fileprivate func calculateTime() {
         guard self.images.isEmpty == false else { return }
 
-        if let videoDuration = self.videoDuration {
-            self.timescale = 100000
-            let average = Int(self.videoDuration! * self.timescale / self.images.count)
-            self.frameDuration = average
-            self.transitionDuration = Int(self.frameDuration / 2)
-        } else {
-            let hasSetDuration = self.videoDuration != nil
-            self.timescale = 1
-            self.frameDuration = 2
-            self.transitionDuration = Int(self.frameDuration / 2)
-            self.videoDuration = self.frameDuration * self.timescale * self.images.count
-
-        }
-
+        let average = CMTimeMultiplyByRatio(videoDuration, multiplier: 1, divisor: Int32(self.images.count))
+        self.frameDuration = average
     }
     
     fileprivate func makeImageFit() {
@@ -162,32 +147,24 @@ public final class SimplerVideoMaker {
         let bufferAdapter = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: writerInput, sourcePixelBufferAttributes: bufferAttributes)
         
         
-        self.startCombine(
-            videoWriter: videoWriter,
-            writerInput: writerInput,
-            bufferAdapter: bufferAdapter,
-            path: path,
-            completed: update)
+        self.startCombine(videoWriter: videoWriter, writerInput: writerInput, bufferAdapter: bufferAdapter, path: path, completed: update)
     }
     
     fileprivate func startCombine(videoWriter: AVAssetWriter,
-               writerInput: AVAssetWriterInput,
-               bufferAdapter: AVAssetWriterInputPixelBufferAdaptor,
-               path: URL,
-               completed: @escaping ProgressHandler)
+                                  writerInput: AVAssetWriterInput,
+                                  bufferAdapter: AVAssetWriterInputPixelBufferAdaptor,
+                                  path: URL,
+                                  completed: @escaping ProgressHandler)
     {
         
         videoWriter.startWriting()
         videoWriter.startSession(atSourceTime: CMTime.zero)
         
-        var presentTime = CMTime(seconds: 0, preferredTimescale: Int32(self.timescale))
+        var presentTime = CMTime.zero
         var i = 0
         
         writerInput.requestMediaDataWhenReady(on: self.mediaInputQueue) { 
-            while i < self.images.count {
-//                let duration = self.transitionDuration
-//                presentTime = CMTime(value: Int64(i * self.frameDuration), timescale: Int32(self.timescale))
-                
+            while i < self.images.count, writerInput.isReadyForMoreMediaData {
                 let presentImage = self.images[i]
 
                 presentTime = self.appendImageBuffer(
@@ -200,6 +177,7 @@ public final class SimplerVideoMaker {
                 self.images[i] = nil
                 i += 1
             }
+            if writerInput.isReadyForMoreMediaData == false { return }
             
             writerInput.markAsFinished()
             videoWriter.finishWriting {
@@ -221,21 +199,13 @@ public final class SimplerVideoMaker {
     
     fileprivate func appendImageBuffer(
                                   presentImage: UIImage?,
-                                  time: CMTime,
+                                  time presentTime: CMTime,
                                   writerInput: AVAssetWriterInput,
-                                  bufferAdapter: AVAssetWriterInputPixelBufferAdaptor) -> CMTime
-    {
-       
-        var presentTime = time
+                                  bufferAdapter: AVAssetWriterInputPixelBufferAdaptor) -> CMTime {
         if let cgImage = presentImage?.cgImage {
             if let buffer = self.transitionPixelBuffer(fromImage: cgImage) {
-                
-                while !writerInput.isReadyForMoreMediaData {
-                    Thread.sleep(forTimeInterval: 0.1)
-                }
-                
                 bufferAdapter.append(buffer, withPresentationTime: presentTime)
-                presentTime = presentTime + CMTime(value: Int64(self.frameDuration), timescale: Int32(self.timescale))
+                return presentTime + self.frameDuration
             }
         }
         return presentTime
