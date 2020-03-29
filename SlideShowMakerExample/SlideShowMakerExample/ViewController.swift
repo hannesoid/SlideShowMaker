@@ -36,7 +36,7 @@ class ViewController: UIViewController {
         }
 
         // OR: VideoMaker(images: images, movement: ImageMovement.fade)
-        let maker = VideoMaker(images: images, transition: ImageTransition.wipeMixed)
+        let maker = SimplerVideoMaker(images: images)
 
         maker.contentMode = .scaleAspectFit
 
