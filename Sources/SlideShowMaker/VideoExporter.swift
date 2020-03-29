@@ -39,6 +39,7 @@ public final class VideoExporter: NSObject {
         public enum ShortBehaviour {
             case repeatUntilEnd
             case playOnce
+            case stretchUntilEnd
         }
 
         public static var constantExportURL: URL {
@@ -48,7 +49,7 @@ public final class VideoExporter: NSObject {
         public init(exportPreset: String = AVAssetExportPresetHighestQuality,
                     temporaryURL: URL = Configuration.constantExportURL,
                     durationBehaviour: DurationBehaviour = .maximumOfAudioAndVideo,
-                    shortVideoBehaviour: ShortBehaviour = .playOnce,
+                    shortVideoBehaviour: ShortBehaviour = .stretchUntilEnd,
                     shortAudioBehaviour: ShortBehaviour = .repeatUntilEnd) {
             self.exportPreset = exportPreset
             self.temporaryURL = temporaryURL
@@ -177,6 +178,10 @@ private extension VideoExporter {
                 print(startSeconds, start, remainDuration, remainTimeRange)
                 try compositionTrack.insertTimeRange(remainTimeRange, of: sourceTrack, at: start)
             }
+        case (true, .stretchUntilEnd):
+            let timeRange = CMTimeRange(start: sourceStart, duration: sourceDuration)
+            try compositionTrack.insertTimeRange(timeRange, of: sourceTrack, at: .zero)
+            compositionTrack.scaleTimeRange(timeRange, toDuration: compositionDuration)
         }
     }
 
