@@ -42,7 +42,7 @@ public final class VideoMaker {
     public var framesToWaitBeforeTransition = 30
     
     fileprivate var videoWriter: AVAssetWriter?
-    fileprivate var videoExporter = VideoExporter()
+    fileprivate var videoExporter: VideoExporter?
     fileprivate var timescale = 10000000
     fileprivate var transitionRate: Double = 1
     fileprivate var isMixed = false
@@ -92,14 +92,16 @@ public final class VideoMaker {
             if success && url != nil {
                 let video = AVURLAsset(url: url!)
                 let item = VideoItem(video: video, audio: audio, audioTimeRange: audioTimeRange)
-                self.videoExporter = VideoExporter(with: item)
-                self.videoExporter.export()
+                self.videoExporter = VideoExporter(videoItem: item)
+                self.videoExporter?.export()
                 let timeRate = self.currentProgress
-                self.videoExporter.exportingBlock = { exportCompleted, progress, videoURL, error in
+                self.videoExporter?.progressHandler = { progress in
                     
                     DispatchQueue.main.async {
-                        self.currentProgress = exportCompleted ? 1 : timeRate + (progress ?? 1) * self.exportTimeRate
-                        completed(exportCompleted, videoURL)
+//                        exportCompleted, progress, videoURL, error
+
+                        self.currentProgress = progress.isCompleted ? 1 : timeRate + /*(progress.progress ?? 1)*/ progress.progress * self.exportTimeRate
+                        completed(progress.isCompleted, progress.resultURL)
                     }
                 }
             } else {
@@ -112,7 +114,7 @@ public final class VideoMaker {
     
     public func cancelExport() {
         self.videoWriter?.cancelWriting()
-        self.videoExporter.cancelExport()
+        self.videoExporter?.cancelExport()
     }
     
     fileprivate func calculateTime() {

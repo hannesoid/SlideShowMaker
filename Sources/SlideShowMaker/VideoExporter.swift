@@ -11,70 +11,72 @@ import AVFoundation
 
 public struct VideoItem {
     
-    var video: AVURLAsset!
+    var video: AVURLAsset
     var audio: AVURLAsset?
+
+    // Optionally specified audio time range
     var audioTimeRange: CMTimeRange?
+    var durationBehaviour: DurationBehaviour = .maximumOfAudioAndVideo
+
+    enum DurationBehaviour {
+        case maximumOfAudioAndVideo
+        case limitByVideo
+        case limitByAudio
+    }
 }
 
-public final class VideoExporter {
+public final class VideoExporter: NSObject {
 
-    /// Callback
-    typealias ExportingBlock = ((_ completed: Bool, _ progress: Float?, _ url: URL?, _ error: Error? ) -> Void)
-    
-    var exportingBlock: ExportingBlock?
-    var videoItem: VideoItem?
-    
-    var mixComposition = AVMutableComposition()
-    
-    let videoTrackID = CMPersistentTrackID(1)
-    let audioTrackID = CMPersistentTrackID(2)
-    var exporter: AVAssetExportSession?
-
-    init() {
+    struct Configuration {
+        var exportPreset: String = AVAssetExportPresetHighestQuality
+        var temporaryURL: URL = VideoMaker.Constants.Path.movURL.appendingPathComponent("exported.mov") // use temp dir instead
     }
 
-    convenience init(with item: VideoItem) {
-        self.init()
-        self.videoItem = item
+    struct Progress {
+        var progress: Float
+        var result: Result<URL, Swift.Error>?
+        var isCompleted: Bool { return self.result != nil }
+        var error: Swift.Error? { return self.result?.error }
+        var resultURL: URL? { return self.result?.value }
+    }
+
+    /// Callback
+    typealias ProgressHandler = (Progress) -> Void
+    
+    var progressHandler: ProgressHandler?
+    let videoItem: VideoItem
+    let configuration: Configuration
+    var avAssetExportSession: AVAssetExportSession?
+
+    init(videoItem: VideoItem, configuration: Configuration = .init()) {
+        self.videoItem = videoItem
+        self.configuration = configuration
     }
     
     public func export() {
-        guard let item = self.videoItem else {
-            self.exportingBlock?(false, 0, nil, NSError(domain: "video item is empty", code: 0, userInfo: nil))
-            return
-        }
-        
-        self.mixComposition = AVMutableComposition()
-        self.addTrack(item: item, composition: self.mixComposition)
-        let videoCompositionTrack = self.mixComposition.track(withTrackID: videoTrackID)!
-        
-        let timeRange = CMTimeRange(start: CMTime.zero, duration: item.video.duration)
-        
-        self.insert(
-            item: item,
-            videoCompositionTrack: videoCompositionTrack,
-            timeRange: timeRange
-        )
-        
-        if item.audio != nil {
-            if let audioCompositionTrack = self.mixComposition.track(withTrackID: audioTrackID) {
-                self.addMusic(item: item, audioCompositionTrack: audioCompositionTrack)
+        let videoItem = self.videoItem
+        let composition = AVMutableComposition()
+        do {
+            guard let videoCompositionTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw ExportError.failedPreparingTracks }
+
+            let videoTotalTimeRange = CMTimeRange(start: .zero, duration: videoItem.video.duration)
+            try self.insertVideoTrack(ofVideoItem: videoItem, intoCompositionTrack: videoCompositionTrack, timeRange: videoTotalTimeRange)
+
+            if videoItem.audio != nil {
+                guard let audioCompositionTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw ExportError.failedPreparingTracks }
+
+                try self.addAudio(ofVideoItem: videoItem, audioCompositionTrack: audioCompositionTrack)
             }
+            self.merge(composition: composition, duration: videoTotalTimeRange.duration)
+        } catch {
+            self.progressHandler?(.init(progress: 0, result: .failure(error)))
         }
-        self.merge(composition: self.mixComposition, duration: timeRange.duration)
     }
     
     public func cancelExport() {
-        if self.isExporting() {
-            self.exporter?.cancelExport()
+        if let session = self.avAssetExportSession, session.status == .exporting {
+            session.cancelExport()
         }
-    }
-    
-    public func isExporting() -> Bool {
-        if self.exporter != nil {
-            return self.exporter!.status == .exporting
-        }
-        return false
     }
 }
 
@@ -82,73 +84,78 @@ public final class VideoExporter {
 
 private extension VideoExporter {
     
-    /// Add video and audio composition track
-    func addTrack(item: VideoItem, composition: AVMutableComposition) {
-        let _ = composition.addMutableTrack(withMediaType: .video, preferredTrackID: videoTrackID)
-        if item.audio != nil {
-            let _ = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: audioTrackID)
+    /// Add video and audio mutable composition tracks
+    func prepareTracks(forAddingVideoItem videoItem: VideoItem, to composition: AVMutableComposition) throws -> (video: AVMutableCompositionTrack, audio: AVMutableCompositionTrack?) {
+        guard let video = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw ExportError.failedPreparingTracks }
+        if videoItem.audio != nil {
+            guard let audio = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw ExportError.failedPreparingTracks }
+
+            return (video, audio)
+        }
+        return (video, nil)
+    }
+    
+    /// Add the item's video track to the video composition
+    func insertVideoTrack(ofVideoItem item: VideoItem, intoCompositionTrack videoCompositionTrack: AVMutableCompositionTrack, timeRange: CMTimeRange) throws {
+        guard let videoTrack = item.video.tracks(withMediaType: .video).first else { return }
+
+        do {
+            try videoCompositionTrack.insertTimeRange(timeRange, of: videoTrack, at: .zero)
+        } catch {
+            throw ExportError.insertingVideoTrackFailed(error)
         }
     }
     
-    /// Add video to composition
-    func insert(item: VideoItem, videoCompositionTrack: AVMutableCompositionTrack, timeRange: CMTimeRange) {
-        guard let videoTrack = item.video.tracks(withMediaType: .video).first else { return }
+    /// Add audio
+    func addAudio(ofVideoItem videoItem: VideoItem, audioCompositionTrack: AVMutableCompositionTrack) throws {
+        guard let audio = videoItem.audio else { return }
+        guard let audioSourceTrack = audio.tracks(withMediaType: .audio).first else { return }
         
-        try? videoCompositionTrack.insertTimeRange(timeRange, of: videoTrack, at: CMTime.zero)
-    }
-    
-    /// Add music
-    func addMusic(item: VideoItem, audioCompositionTrack: AVMutableCompositionTrack) {
-        guard let audio = item.audio else { return }
-        
-        let audioStart = item.audioTimeRange != nil ? item.audioTimeRange!.start : CMTime.zero
-        let audioDuration = item.audioTimeRange != nil ? item.audioTimeRange!.duration : audio.duration
+        let audioStart = videoItem.audioTimeRange?.start ?? CMTime.zero
+        let audioDuration = videoItem.audioTimeRange?.duration ?? audio.duration
         let audioTimescale = audio.duration.timescale
-        let videoDuratin = item.video.duration
-        
-        // video is lengther than audio
-        if videoDuratin.seconds > audioDuration.seconds {
-            let repeatCount = Int(videoDuratin.seconds / audioDuration.seconds)
-            let remain = videoDuratin.seconds.truncatingRemainder(dividingBy: audioDuration.seconds)
-            let timeRange = CMTimeRange(start: audioStart, duration: audioDuration)
+        let videoDuration = videoItem.video.duration
+
+
+        if videoDuration.seconds <= audioDuration.seconds {
+            let timeRange = CMTimeRange(start: audioStart, duration: videoDuration)
+            try audioCompositionTrack.insertTimeRange(timeRange, of: audioSourceTrack, at: .zero)
+            return
+        }
+
+        // video is longer than audio
+        if videoDuration.seconds > audioDuration.seconds {
+            let repeatCount = Int(videoDuration.seconds / audioDuration.seconds)
+            let remainder = videoDuration.seconds.truncatingRemainder(dividingBy: audioDuration.seconds)
+            let audioTotalTimeRange = CMTimeRange(start: audioStart, duration: audioDuration)
             
             for i in 0..<repeatCount {
                 let start = CMTime(seconds: Double(i) * audioDuration.seconds, preferredTimescale: audioTimescale)
-                
-                self.addAudio(audio: audio, start: start, timeRage: timeRange, audioCompositionTrack: audioCompositionTrack)
+
+                try audioCompositionTrack.insertTimeRange(audioTotalTimeRange, of: audioSourceTrack, at: start)
             }
             
-            if remain > 0 {
+            if remainder > 0 {
                 let startSeconds = Double(repeatCount) * audioDuration.seconds
                 let start = CMTime(seconds: startSeconds, preferredTimescale: audioTimescale)
-                let remainDuration = CMTime(seconds: remain, preferredTimescale: audioTimescale)
+                let remainDuration = CMTime(seconds: remainder, preferredTimescale: audioTimescale)
                 let remainTimeRange = CMTimeRange(start: audioStart, duration: remainDuration)
                 
                 print(startSeconds, start, remainDuration, remainTimeRange)
-                self.addAudio(audio: audio, start: start, timeRage: remainTimeRange, audioCompositionTrack: audioCompositionTrack)
-                
+                try audioCompositionTrack.insertTimeRange(remainTimeRange, of: audioSourceTrack, at: start)
             }
-        } else {
-            let timeRange = CMTimeRange(start: audioStart, duration: videoDuratin)
-            self.addAudio(audio: audio, start: CMTime.zero, timeRage: timeRange, audioCompositionTrack: audioCompositionTrack)
         }
     }
-    
-    func addAudio(audio: AVURLAsset, start: CMTime, timeRage: CMTimeRange, audioCompositionTrack: AVMutableCompositionTrack) {
-        if let track = audio.tracks(withMediaType: .audio).first {
-            try? audioCompositionTrack.insertTimeRange(timeRage, of: track, at: start)
-        }
-    }
-    
+
     func merge(composition: AVMutableComposition, duration: CMTime) {
-        
         let filename = "merge.mov"
+
         let path = VideoMaker.Constants.Path.movURL.appendingPathComponent(filename)
         print(path)
         self.deletePreviousTmpVideo(url: path)
         
-        self.exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
-        if let exporter = self.exporter {
+        self.avAssetExportSession = AVAssetExportSession(asset: composition, presetName: self.configuration.exportPreset)
+        if let exporter = self.avAssetExportSession {
             exporter.outputURL = path
             exporter.outputFileType = .mov
             exporter.shouldOptimizeForNetworkUse = true
@@ -157,14 +164,15 @@ private extension VideoExporter {
             let timer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: #selector(self.readProgress), userInfo: nil, repeats: true)
             
             exporter.exportAsynchronously {
-                
                 timer.invalidate()
                 
                 if exporter.status == AVAssetExportSession.Status.failed {
+                    self.avAssetExportSession = nil
                     print(#function, exporter.error ?? "unknow error")
-                    self.exportingBlock?(false, nil, nil, exporter.error)
+                    self.progressHandler?(.init(progress: 0, result: .failure(ExportError.exporterFailed(exporter.error))))
                 } else {
-                    self.exportingBlock?(true, 1.0, path, nil)
+                    self.avAssetExportSession = nil
+                    self.progressHandler?(.init(progress: 1.0, result: .success(path)))
                 }
                 print("export completed")
             }
@@ -183,9 +191,37 @@ private extension VideoExporter {
     }
     
     @objc func readProgress() {
-        if let exporter = self.exporter {
+        if let exporter = self.avAssetExportSession {
             print(#function, exporter.progress)
-            exportingBlock?(false, exporter.progress, nil, nil)
+            progressHandler?(.init(progress: exporter.progress, result: nil))
         }
+    }
+}
+
+extension VideoExporter {
+
+    enum ExportError: Swift.Error {
+
+        case exporterFailed(Swift.Error?)
+        case insertingVideoTrackFailed(Swift.Error)
+        case failedPreparingTracks
+        case incompleteAudioData
+    }
+}
+
+private extension Result {
+
+    var error: Failure? {
+        if case .failure(let error) = self {
+            return error
+        }
+        return nil
+    }
+
+    var value: Success? {
+        if case .success(let value) = self {
+            return value
+        }
+        return nil
     }
 }
