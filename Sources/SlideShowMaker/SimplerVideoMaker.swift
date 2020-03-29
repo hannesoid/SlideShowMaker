@@ -11,12 +11,10 @@ import AVFoundation
 
 public final class SimplerVideoMaker {
     
-    public typealias CompletedCombineBlock = (_ success: Bool, _ videoURL: URL?) -> Void
-    public typealias Progress = (_ progress: Float) -> Void
+    public typealias ProgressHandler = (Result<URL, VideoError>?) -> Void
 
     public var images: [UIImage?] = []
     public var contentMode = UIView.ContentMode.scaleAspectFit
-    public var progress: Progress?
     public var quarity = CGInterpolationQuality.low
     
     // Video resolution
@@ -36,47 +34,39 @@ public final class SimplerVideoMaker {
     fileprivate var videoWriter: AVAssetWriter?
     fileprivate var videoExporter: VideoExporter?
     fileprivate var timescale = 10000000
-    fileprivate let fadeOffset: CGFloat = 30
     fileprivate let mediaInputQueue = DispatchQueue(label: "mediaInputQueue")
     fileprivate let flags = CVPixelBufferLockFlags(rawValue: 0)
-    
-    fileprivate var exportTimeRate: Float = 0.0
-    fileprivate var waitTranstionTimeRate: Float = 0
-    fileprivate var transitionTimeRate: Float = 0
-    fileprivate var writerTimeRate: Float = 0.9 {
-        didSet {
-            self.calculatorTimeRate()
-        }
-    }
-    
-    fileprivate var currentProgress: Float = 0.0 {
-        didSet {
-            self.progress?(self.currentProgress)
-        }
-    }
+
 
     public init(images: [UIImage]) {
         self.images = images
     }
 
-    public func exportVideo(audio: AVURLAsset?, audioTimeRange: CMTimeRange?, completed: @escaping CompletedCombineBlock) -> SimplerVideoMaker {
+    public func exportVideo(audio: AVURLAsset?, audioTimeRange: CMTimeRange?, updateHandler: @escaping ProgressHandler) -> SimplerVideoMaker {
         self.createDirectory()
-        self.currentProgress = 0.0
-        self.combineVideo { (success, url) in
-            if success && url != nil {
-                let video = AVURLAsset(url: url!)
+        self.combineVideo { currentResult in
+            switch currentResult {
+            case .none:
+                updateHandler(currentResult)
+            case .some(.failure):
+                updateHandler(currentResult)
+            case .some(.success(let url)):
+                let video = AVURLAsset(url: url)
                 let item = VideoItem(video: video, audio: audio, audioTimeRange: audioTimeRange)
                 self.videoExporter = VideoExporter(videoItem: item)
                 self.videoExporter?.export()
-                let timeRate = self.currentProgress
                 self.videoExporter?.progressHandler = { progress in
                     DispatchQueue.main.async {
-                        self.currentProgress = progress.isCompleted ? 1 : timeRate + /*(progress.progress ?? 1)*/ progress.progress * self.exportTimeRate
-                        completed(progress.isCompleted, progress.resultURL)
+                        switch progress.result {
+                        case .none:
+                            updateHandler(nil)
+                        case .failure(let error):
+                            updateHandler(.failure(.combiningVideoAudioFailed(error)))
+                        case .success(let url):
+                            updateHandler(.success(url))
+                        }
                     }
                 }
-            } else {
-                completed(false, nil)
             }
         }
         return self
@@ -89,16 +79,21 @@ public final class SimplerVideoMaker {
     
     fileprivate func calculateTime() {
         guard self.images.isEmpty == false else { return }
-        
-        let hasSetDuration = self.videoDuration != nil
-        self.timescale = hasSetDuration ? 100000 : 1
-        let average = hasSetDuration ? Int(self.videoDuration! * self.timescale / self.images.count) : 2
 
-        self.frameDuration = hasSetDuration ? average : 2
-        self.transitionDuration = Int(self.frameDuration / 2)
-        if hasSetDuration == false {
+        if let videoDuration = self.videoDuration {
+            self.timescale = 100000
+            let average = Int(self.videoDuration! * self.timescale / self.images.count)
+            self.frameDuration = average
+            self.transitionDuration = Int(self.frameDuration / 2)
+        } else {
+            let hasSetDuration = self.videoDuration != nil
+            self.timescale = 1
+            self.frameDuration = 2
+            self.transitionDuration = Int(self.frameDuration / 2)
             self.videoDuration = self.frameDuration * self.timescale * self.images.count
+
         }
+
     }
     
     fileprivate func makeImageFit() {
@@ -122,14 +117,14 @@ public final class SimplerVideoMaker {
         self.images = newImages
     }
     
-    fileprivate func combineVideo(completed: CompletedCombineBlock?) {
+    fileprivate func combineVideo(update: @escaping ProgressHandler) {
         self.makeImageFit()
-        self.makeTransitionVideo(completed: completed)
+        self.makeTransitionVideo(update: update)
     }
 
-    fileprivate func makeTransitionVideo(completed: CompletedCombineBlock?) {
+    fileprivate func makeTransitionVideo(update: @escaping ProgressHandler) {
         guard self.images.isEmpty == false else {
-            completed?(false, nil)
+            update(.failure(.noImages))
             return
         }
         
@@ -146,7 +141,7 @@ public final class SimplerVideoMaker {
         
         guard let videoWriter = self.videoWriter else {
             print("Create video writer failed")
-            completed?(false, nil)
+            update(.failure(.unknown))
             return
         }
         
@@ -171,15 +166,15 @@ public final class SimplerVideoMaker {
             videoWriter: videoWriter,
             writerInput: writerInput,
             bufferAdapter: bufferAdapter,
-            completed: { (success, url) in
-                completed?(success, path)
-        })
+            path: path,
+            completed: update)
     }
     
     fileprivate func startCombine(videoWriter: AVAssetWriter,
                writerInput: AVAssetWriterInput,
                bufferAdapter: AVAssetWriterInputPixelBufferAdaptor,
-               completed: CompletedCombineBlock?)
+               path: URL,
+               completed: @escaping ProgressHandler)
     {
         
         videoWriter.startWriting()
@@ -190,8 +185,8 @@ public final class SimplerVideoMaker {
         
         writerInput.requestMediaDataWhenReady(on: self.mediaInputQueue) { 
             while i < self.images.count {
-                let duration = self.transitionDuration
-                presentTime = CMTime(value: Int64(i * duration), timescale: Int32(self.timescale))
+//                let duration = self.transitionDuration
+//                presentTime = CMTime(value: Int64(i * self.frameDuration), timescale: Int32(self.timescale))
                 
                 let presentImage = self.images[i]
 
@@ -210,8 +205,15 @@ public final class SimplerVideoMaker {
             videoWriter.finishWriting {
                 DispatchQueue.main.async {
                     print("finished")
+
                     print(videoWriter.error ?? "no error")
-                    completed?(videoWriter.error == nil, nil)
+                    if let error = videoWriter.error {
+                        completed(.failure(.systemError(error)))
+                        return
+                    } else {
+                        completed(.success(path))
+                    }
+
                 }
             }
         }
@@ -233,8 +235,7 @@ public final class SimplerVideoMaker {
                 }
                 
                 bufferAdapter.append(buffer, withPresentationTime: presentTime)
-                self.currentProgress += self.waitTranstionTimeRate
-                presentTime = presentTime + CMTime(value: Int64(self.frameDuration - self.transitionDuration), timescale: Int32(self.timescale))
+                presentTime = presentTime + CMTime(value: Int64(self.frameDuration), timescale: Int32(self.timescale))
             }
         }
         return presentTime
@@ -308,16 +309,14 @@ public final class SimplerVideoMaker {
         }
     }
 
-    fileprivate func calculatorTimeRate() {
-        if self.images.isEmpty == false {
-//            self.exportTimeRate = 1 - self.writerTimeRate
-//            let frameTimeRate = self.writerTimeRate / Float(self.images.count)
-//            self.waitTranstionTimeRate = frameTimeRate * 0.2
-//            self.transitionTimeRate = frameTimeRate - self.waitTranstionTimeRate
-        }
-    }
-    
     fileprivate  func createDirectory() {
         try? FileManager.default.createDirectory(at: VideoMaker.Constants.Path.movURL, withIntermediateDirectories: true, attributes: nil)
+    }
+
+    public enum VideoError: Swift.Error {
+        case noImages
+        case unknown
+        case systemError(Swift.Error)
+        case combiningVideoAudioFailed(Swift.Error)
     }
 }
